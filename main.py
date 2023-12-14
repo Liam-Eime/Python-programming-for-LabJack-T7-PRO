@@ -3,6 +3,8 @@ from labjack import ljm
 # Define constants for convenience
 FIRST_AIN_CHANNEL = 0  # 0 = AIN0
 NUMBER_OF_AINS = 3
+OUTPUT_DIR = "data"
+OUTPUT_FILENAME = "data.txt"
 
 # Open first found LabJack T7 via USB.
 handle = ljm.open(
@@ -35,20 +37,22 @@ aScanList = ljm.namesToAddresses(numAddresses, aScanListNames)[0]
 scanRate = 30000  # Hz
 scansPerRead = int(scanRate / 2)
 
-# Configure and start stream
-scanRate = ljm.eStreamStart(handle, scansPerRead, numAddresses, aScanList, scanRate)
-print("\nStream started with a scan rate of %0.0f Hz." % scanRate)
+try:
+    # Configure and start stream
+    scanRate = ljm.eStreamStart(handle, scansPerRead, numAddresses, aScanList, scanRate)
+    print("\nStream started with a scan rate of %0.0f Hz." % scanRate)
+    while True:
+        ret = ljm.eStreamRead(handle)
+        aData = ret[0]
+        scans = len(aData) / numAddresses
+        print(type(aData))
+        # with open(OUTPUT_DIR + "/" + OUTPUT_FILENAME, "a") as f:
+        #     f.write(f"{aData}\n")
+except Exception as e:
+    print("\nUnexpected error: %s" % str(e))
+finally:
+    print("\nStop Stream")
+    ljm.eStreamStop(handle)
 
-ret = ljm.eStreamRead(handle)
-aData = ret[0]
-scans = len(aData) / numAddresses
-
-print("\nStop Stream")
-ljm.eStreamStop(handle)
-
-# Close handle
-ljm.close(handle)
-
-
-
-
+    # Close handle
+    ljm.close(handle)
