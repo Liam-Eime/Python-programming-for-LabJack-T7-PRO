@@ -1,6 +1,6 @@
 from labjack import ljm
+import time
 import atexit
-import csv
 
 # Define cleanup function to be called when script finishes
 def cleanup():
@@ -33,6 +33,9 @@ print("Opened a LabJack with Device type: %i, Connection type: %i,\n"
 ljm.eWriteName(handle, "STREAM_TRIGGER_INDEX", 0)
 # Enabling internally-clocked stream.
 ljm.eWriteName(handle, "STREAM_CLOCK_SOURCE", 0)
+# Set the stream buffer size to the maximum value, 32768 bytes.
+max_buffer_size = 32768
+ljm.eWriteName(handle, "STREAM_BUFFER_SIZE_BYTES", max_buffer_size)
 
 # AIN ranges are +/-10 V, stream resolution index is 0 (default).
 # Negative Channel = GND (single-ended), settling = 0 (default).
@@ -46,10 +49,11 @@ atexit.register(cleanup)
 aScanListNames = ["AIN%i" % i for i in range(FIRST_AIN_CHANNEL, FIRST_AIN_CHANNEL + NUMBER_OF_AINS)]  # Scan list names to stream
 numAddresses = len(aScanListNames)
 aScanList = ljm.namesToAddresses(numAddresses, aScanListNames)[0]
-scanRate = 1000  # Hz
-scansPerRead = int(scanRate / 10)
+scanRate = 30000 # Hz
+scansPerRead = int(scanRate)
 
 totSkip = 0  # The number of skipped samples
+dat = []
 
 try:
     # Configure and start stream
@@ -57,14 +61,11 @@ try:
     print("\nStream started with a scan rate of %0.0f Hz." % scanRate)
     while True:
         ret = ljm.eStreamRead(handle)
-        aData = ret[0]
-        totSkip += aData.count(-9999.0) / NUMBER_OF_AINS
-        scans = len(aData) / numAddresses
-        print(type(aData), scans, totSkip)
-        rows = [aData[i:i+NUMBER_OF_AINS] for i in range(0, len(aData), NUMBER_OF_AINS)]
-        with open(OUTPUT_DIR + "/" + OUTPUT_FILENAME, "a", newline='') as f:
-            writer = csv.writer(f)
-            writer.writerows(rows)
+        dat.extend(ret[0])
+        # get rows of data
+        rows = [dat[i:i+NUMBER_OF_AINS] for i in range(0, len(dat), NUMBER_OF_AINS)]
+        print(rows)
+        print(f"Errors: {dat.count(-9999.0)}")
 except Exception as e:
     print("\nUnexpected error: %s" % str(e))
 finally:
