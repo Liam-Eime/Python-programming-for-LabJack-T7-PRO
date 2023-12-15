@@ -1,4 +1,5 @@
 from labjack import ljm
+import numpy as np
 import time
 import atexit
 
@@ -53,7 +54,12 @@ scanRate = 30000 # Hz
 scansPerRead = int(scanRate)
 
 totSkip = 0  # The number of skipped samples
-dat = []
+raw_data = []
+thresholds = [0.1, 0.1, 1]
+
+# Initialize the maximum values and the flags for each channel
+max_values = [0, 0, 0]
+above_threshold = [False, False, False]
 
 try:
     # Configure and start stream
@@ -61,13 +67,26 @@ try:
     print("\nStream started with a scan rate of %0.0f Hz." % scanRate)
     while True:
         ret = ljm.eStreamRead(handle)
-        dat.extend(ret[0])
+        raw_data.extend((np.array(ret[0]) - 2.5).tolist())
         # get rows of data
-        rows = [dat[i:i+NUMBER_OF_AINS] for i in range(0, len(dat), NUMBER_OF_AINS)]
-        print(rows)
-        print(f"Errors: {dat.count(-9999.0)}")
+        rows = [raw_data[i:i+NUMBER_OF_AINS] for i in range(0, len(raw_data), NUMBER_OF_AINS)]
+        # Check for values above the threshold
+        for row in rows:
+            for i in range(NUMBER_OF_AINS):
+                if row[i] > thresholds[i]:
+                    # Value is above the threshold, update the maximum value
+                    max_values[i] = max(max_values[i], row[i])
+                    above_threshold[i] = True
+                elif above_threshold[i]:
+                    # Value is below the threshold, print and reset the maximum value
+                    print(f"Max value for channel {i}: {max_values[i]}")
+                    max_values[i] = 0
+                    above_threshold[i] = False
+        print(f"Errors: {raw_data.count(-9999.0)}")
 except Exception as e:
     print("\nUnexpected error: %s" % str(e))
+except KeyboardInterrupt:  # Ctrl+C
+    print("\nKeyboard Interrupt caught.")
 finally:
     print("\nStop Stream")
     ljm.eStreamStop(handle)
