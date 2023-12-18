@@ -63,9 +63,6 @@ ljm.eWriteName(handle, "STREAM_BUFFER_SIZE_BYTES", max_buffer_size)
 aNames = ["AIN_ALL_RANGE", "STREAM_RESOLUTION_INDEX", "AIN_ALL_NEGATIVE_CH", "STREAM_SETTLING_US"]
 aValues = [10.0, 0, ljm.constants.GND, 0]
 
-# # Register cleanup function to be called when script finishes
-# atexit.register(cleanup)
-
 # Stream Configuration
 aScanListNames = ["AIN%i" % i for i in range(FIRST_AIN_CHANNEL, FIRST_AIN_CHANNEL + NUMBER_OF_AINS)]  # Scan list names to stream
 numAddresses = len(aScanListNames)
@@ -90,9 +87,9 @@ try:
         t = threading.Thread(target=process_data, args=(new_data,))
         t.start()
         end = time.time()
-        print(f"Time to process: {end - start}")
-        print(f"Scan Backlog: {ret[1]}")
-        print(f"Errors: {raw_data.count(-9999.0)}")
+        print(f"\nTime to process: {end - start}")
+        print(f"\nScan Backlog: {ret[1]}")
+        print(f"\nErrors: {raw_data.count(-9999.0)}")
 except Exception as e:
     print("\nUnexpected error: %s" % str(e))
 except KeyboardInterrupt:  # Ctrl+C
