@@ -4,6 +4,15 @@ import threading
 import time
 import atexit
 
+# Define constants for convenience
+FIRST_AIN_CHANNEL = 0  # 0 = AIN0
+NUMBER_OF_AINS = 3
+OUTPUT_DIR = "data"
+OUTPUT_FILENAME = "data.csv"
+ACCEL_TO_G_OFFSET = 2.5  # 2.5 V = 0 g
+ACCEL_TO_G_SENSITIVITY = 1  # 1 V/g
+BUFFER_PERIOD = 1.0  # Buffer period in seconds
+
 # Define the thresholds and the last spike times for each channel
 thresholds = [0.3, 0.3, 1.5]  # x, y, z
 last_spike_times = [0, 0, 0]
@@ -14,7 +23,7 @@ above_threshold = [False, False, False]
 
 # Define process data function for stream
 def process_data(data):
-    buffer_period = 1.0  # Buffer period in seconds
+    buffer_period = BUFFER_PERIOD  # Buffer period in seconds
     for i in range(NUMBER_OF_AINS):
         for value in data[i::NUMBER_OF_AINS]:
             current_time = time.time()
@@ -28,13 +37,6 @@ def process_data(data):
                 print(f"\nMax value for channel {i}: {max_values[i]:.5f}g")
                 max_values[i] = 0
                 above_threshold[i] = False
-
-
-# Define constants for convenience
-FIRST_AIN_CHANNEL = 0  # 0 = AIN0
-NUMBER_OF_AINS = 3
-OUTPUT_DIR = "data"
-OUTPUT_FILENAME = "data.csv"
 
 # Open first found LabJack T7 via USB.
 handle = ljm.open(
@@ -70,7 +72,7 @@ aScanList = ljm.namesToAddresses(numAddresses, aScanListNames)[0]
 scanRate = 30000 # Hz
 scansPerRead = int(scanRate)
 
-totSkip = 0  # The number of skipped samples
+# Initialize the raw data list and the scan backlog
 raw_data = []
 scan_backlog = 0
 
@@ -81,7 +83,7 @@ try:
     while True:
         ret = ljm.eStreamRead(handle)
         start = time.time()
-        new_data =(np.array(ret[0]) - 2.5).tolist()
+        new_data = ((np.array(ret[0]) - ACCEL_TO_G_OFFSET)/ACCEL_TO_G_SENSITIVITY).tolist()  # Convert to g
         raw_data.extend(new_data)
         # Start a new thread to process the data
         t = threading.Thread(target=process_data, args=(new_data,))
