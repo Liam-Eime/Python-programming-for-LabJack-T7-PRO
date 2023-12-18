@@ -1,14 +1,25 @@
 from labjack import ljm
 import numpy as np
+import threading
 import time
 import atexit
 
-# # Define cleanup function to be called when script finishes
-# def cleanup():
-#     print("\nStop Stream")
-#     ljm.eStreamStop(handle)
-#     print("\nClose Handle")
-#     ljm.close(handle)
+# Define process data function for stream
+def process_data(data):
+    # get rows of data
+    # rows = [raw_data[i:i+NUMBER_OF_AINS] for i in range(0, len(raw_data), NUMBER_OF_AINS)]
+    for i in range(NUMBER_OF_AINS):
+        for value in data[i::NUMBER_OF_AINS]:
+            if value > thresholds[i]:
+                # Value is above the threshold, update the maximum value
+                max_values[i] = max(max_values[i], value)
+                above_threshold[i] = True
+            elif above_threshold[i]:
+                # Value is below the threshold, print and reset the maximum value
+                print(f"\nMax value for channel {i}: {max_values[i]:.5f}g")
+                max_values[i] = 0
+                above_threshold[i] = False
+
 
 # Define constants for convenience
 FIRST_AIN_CHANNEL = 0  # 0 = AIN0
@@ -56,7 +67,7 @@ scansPerRead = int(scanRate)
 totSkip = 0  # The number of skipped samples
 raw_data = []
 scan_backlog = 0
-thresholds = [0.1, 0.1, 1]
+thresholds = [0.3, 0.3, 1.5]
 
 # Initialize the maximum values and the flags for each channel
 max_values = [0, 0, 0]
@@ -68,28 +79,15 @@ try:
     print("\nStream started with a scan rate of %0.0f Hz." % scanRate)
     while True:
         ret = ljm.eStreamRead(handle)
-
         start = time.time()
-        raw_data.extend((np.array(ret[0]) - 2.5).tolist())
-        scan_backlog = ret[1]
-        # get rows of data
-        rows = [raw_data[i:i+NUMBER_OF_AINS] for i in range(0, len(raw_data), NUMBER_OF_AINS)]
+        new_data =(np.array(ret[0]) - 2.5).tolist()
+        raw_data.extend(new_data)
+        # Start a new thread to process the data
+        t = threading.Thread(target=process_data, args=(new_data,))
+        t.start()
         end = time.time()
-        
         print(f"Time to process: {end - start}")
-        # Check for values above the threshold
-        # for row in rows:
-        #     for i in range(NUMBER_OF_AINS):
-        #         if row[i] > thresholds[i]:
-        #             # Value is above the threshold, update the maximum value
-        #             max_values[i] = max(max_values[i], row[i])
-        #             above_threshold[i] = True
-        #         elif above_threshold[i]:
-        #             # Value is below the threshold, print and reset the maximum value
-        #             print(f"Max value for channel {i}: {max_values[i]}")
-        #             max_values[i] = 0
-        #             above_threshold[i] = False
-        print(f"Scan Backlog: {scan_backlog}")
+        print(f"Scan Backlog: {ret[1]}")
         print(f"Errors: {raw_data.count(-9999.0)}")
 except Exception as e:
     print("\nUnexpected error: %s" % str(e))
