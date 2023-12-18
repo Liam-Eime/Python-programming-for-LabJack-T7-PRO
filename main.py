@@ -4,18 +4,27 @@ import threading
 import time
 import atexit
 
+# Define the thresholds and the last spike times for each channel
+thresholds = [0.3, 0.3, 1.5]  # x, y, z
+last_spike_times = [0, 0, 0]
+
+# Initialize the maximum values and the flags for each channel
+max_values = [0, 0, 0]
+above_threshold = [False, False, False]
+
 # Define process data function for stream
 def process_data(data):
-    # get rows of data
-    # rows = [raw_data[i:i+NUMBER_OF_AINS] for i in range(0, len(raw_data), NUMBER_OF_AINS)]
+    buffer_period = 1.0  # Buffer period in seconds
     for i in range(NUMBER_OF_AINS):
         for value in data[i::NUMBER_OF_AINS]:
+            current_time = time.time()
             if value > thresholds[i]:
-                # Value is above the threshold, update the maximum value
+                # Value is above the threshold, update the maximum value and the last spike time
                 max_values[i] = max(max_values[i], value)
+                last_spike_times[i] = current_time
                 above_threshold[i] = True
-            elif above_threshold[i]:
-                # Value is below the threshold, print and reset the maximum value
+            elif above_threshold[i] and current_time - last_spike_times[i] > buffer_period:
+                # Value is below the threshold and the buffer period has passed, print and reset the maximum value
                 print(f"\nMax value for channel {i}: {max_values[i]:.5f}g")
                 max_values[i] = 0
                 above_threshold[i] = False
@@ -67,11 +76,6 @@ scansPerRead = int(scanRate)
 totSkip = 0  # The number of skipped samples
 raw_data = []
 scan_backlog = 0
-thresholds = [0.3, 0.3, 1.5]
-
-# Initialize the maximum values and the flags for each channel
-max_values = [0, 0, 0]
-above_threshold = [False, False, False]
 
 try:
     # Configure and start stream
