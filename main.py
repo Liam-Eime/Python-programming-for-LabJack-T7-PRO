@@ -13,26 +13,31 @@ OUTPUT_FILENAME = "data.csv"
 ACCEL_TO_G_OFFSET = 2.5  # 2.5 V = 0 g
 ACCEL_TO_G_SENSITIVITY = 1  # 1 V/g
 BUFFER_PERIOD = 0.05  # Buffer period in seconds
+SCAN_RATE = 30000  # Hz
+THRESHOLDS = [0.6, 0.6, 1.2]  # x, y, z
 
 # Initialize variables
-thresholds = [0.3, 0.3, 1.5]  # x, y, z
 last_spike_times = [0, 0, 0]
 max_values = [0, 0, 0]
 in_event = [False, False, False]
 total_data_points = 0
 raw_data = []
 scan_backlog = 0
+core_timer_values = []
+system_times = []
+scan_system_times = []
 
+# Create a lock for scan_system_times
+scan_system_times_lock = threading.Lock()
 
 # Define process data function for stream
 def process_data(data):
     global total_data_points
     for i in range(NUMBER_OF_AINS):
         for j, value in enumerate(data[i::NUMBER_OF_AINS]):
-            # current_time = start_time + (total_data_points + j) / scanRate
-            current_time = scan_system_times[total_data_points + j]
-            total_data_points += 1
-            if value > thresholds[i]:
+            with scan_system_times_lock:
+                current_time = scan_system_times[total_data_points + j]
+            if value > THRESHOLDS[i]:
                 if value > max_values[i]:
                     # Value is above the current maximum, update the maximum value and the last spike time
                     max_values[i] = value
@@ -44,7 +49,7 @@ def process_data(data):
                 print(f"\nMax value for channel {i}: {max_values[i]:.5f}g at {time_str}")
                 max_values[i] = 0
                 in_event[i] = False
-    # total_data_points += len(data) // NUMBER_OF_AINS
+    total_data_points += len(data) // NUMBER_OF_AINS
 
 # Open first found LabJack T7 via USB.
 handle = ljm.open(
@@ -78,57 +83,47 @@ ljm.eWriteNames(handle, len(aNames), aNames, aValues)
 aScanListNames = ["AIN%i" % i for i in range(FIRST_AIN_CHANNEL, FIRST_AIN_CHANNEL + NUMBER_OF_AINS)]  # Scan list names to stream
 numAddresses = len(aScanListNames)
 aScanList = ljm.namesToAddresses(numAddresses, aScanListNames)[0]
-scanRate = 30000 # Hz
-scansPerRead = int(scanRate)
+scansPerRead = int(SCAN_RATE)
 
 # Timestamp for data
 # Correlate CORE_TIMER with system clock
-core_timer_values = []
-system_times = []
-scan_system_times = []
 for _ in range(100):
     start = time.time()
-    core_timer = ljm.eReadName(handle, "CORE_TIMER")
+    core_timer = ljm.eReadName(handle, "CORE_TIMER") / 40e6
     end = time.time()
     core_timer_values.append(core_timer)
-    system_times.append((start + end) / 2)  # Assume CORE_TIMER is halfway between start and end
-    
+    system_times.append((start + end) / 2)  # Assume CORE_TIMER is halfway between start and end (as suggested by LabJack documentation)  
 # Calculate average distance between CORE_TIMER and system clock
 average_difference = np.mean(np.array(system_times) - np.array(core_timer_values))
 
 # Perform data acquisition
 try:
     # Configure and start stream
-    scanRate = ljm.eStreamStart(handle, scansPerRead, numAddresses, aScanList, scanRate)
+    scanRate = ljm.eStreamStart(handle, scansPerRead, numAddresses, aScanList, SCAN_RATE)
     print("\nStream started with a scan rate of %0.0f Hz." % scanRate)
-    start_time = ljm.eReadName(handle, "STREAM_START_TIME_STAMP")
-    
+    start_time = ljm.eReadName(handle, "STREAM_START_TIME_STAMP") / 40e6
     while True:
+        # Read stream data
         ret = ljm.eStreamRead(handle)
         new_data = ((np.array(ret[0]) - ACCEL_TO_G_OFFSET)/ACCEL_TO_G_SENSITIVITY).tolist()  # Convert to g
         raw_data.extend(new_data)
-        
         # Calculate CORE_TIMER value for each scan
-        scan_core_timer_values = (start_time + np.arange(len(ret[0])) / scanRate) / 40e6
-        # Convert CORE_TIMER values to system times
-        scan_system_times.extend(scan_core_timer_values + average_difference)
-        
-        # print size of new_data
-        print(f"\nnew_data size: {len(new_data)}")
-        # print size of scan_system_times
-        print(f"\nscan_system_times size: {len(scan_system_times)}")
-        
+        scan_core_timer_values = (start_time + np.arange(len(ret[0])) / scanRate)
+        with scan_system_times_lock:
+            # Convert CORE_TIMER values to system times
+            scan_system_times.extend(scan_core_timer_values + average_difference)
         # Start a new thread to process the data
         t = threading.Thread(target=process_data, args=(new_data,))
         t.start()
+        # Print total errors
         print(f"\nTotal Errors: {raw_data.count(ljm.constants.DUMMY_VALUE)}")
 except Exception as e:
     print("\nUnexpected error: %s" % str(e))
 except KeyboardInterrupt:  # Ctrl+C
     print("\nKeyboard Interrupt caught.")
 finally:
+    # Stop stream
     print("\nStop Stream")
     ljm.eStreamStop(handle)
-
     # Close handle
     ljm.close(handle)
