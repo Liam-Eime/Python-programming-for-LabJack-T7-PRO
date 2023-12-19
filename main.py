@@ -29,7 +29,9 @@ def process_data(data):
     global total_data_points
     for i in range(NUMBER_OF_AINS):
         for j, value in enumerate(data[i::NUMBER_OF_AINS]):
-            current_time = t7_time + (total_data_points + j) / scanRate
+            # current_time = start_time + (total_data_points + j) / scanRate
+            current_time = scan_system_times[total_data_points + j]
+            total_data_points += 1
             if value > thresholds[i]:
                 if value > max_values[i]:
                     # Value is above the current maximum, update the maximum value and the last spike time
@@ -38,11 +40,11 @@ def process_data(data):
                 in_event[i] = True
             elif in_event[i] and current_time - last_spike_times[i] > BUFFER_PERIOD:
                 # Value is below the threshold and the buffer period has passed, print and reset the maximum value
-                time_str = datetime.fromtimestamp(last_spike_times[i]).strftime('%y/%m/%d %H:%M:%S%f')
+                time_str = datetime.fromtimestamp(last_spike_times[i]).strftime('%y/%m/%d %H:%M:%S.%f')[:21]
                 print(f"\nMax value for channel {i}: {max_values[i]:.5f}g at {time_str}")
                 max_values[i] = 0
                 in_event[i] = False
-    total_data_points += len(data) // NUMBER_OF_AINS
+    # total_data_points += len(data) // NUMBER_OF_AINS
 
 # Open first found LabJack T7 via USB.
 handle = ljm.open(
@@ -56,15 +58,6 @@ info = ljm.getHandleInfo(handle)
 print("Opened a LabJack with Device type: %i, Connection type: %i,\n"
       "Serial number: %i, IP address: %s, Port: %i,\nMax bytes per MB: %i" %
       (info[0], info[1], info[2], ljm.numberToIP(info[3]), info[4], info[5]))
-# Get the current time from computer
-comp_time = int(time.time())
-# Write the current time to the T7's real-time clock
-ljm.eWriteName(handle, "RTC_SET_TIME_S", comp_time)  # Set the T7's real-time cl
-# Read the current time from the T7's real-time clock
-t7_time = ljm.eReadName(handle, "RTC_TIME_S")
-
-print(comp_time)
-print(t7_time)
 
 # T7 configuration
 # Ensure triggered stream is disabled.
@@ -88,22 +81,46 @@ aScanList = ljm.namesToAddresses(numAddresses, aScanListNames)[0]
 scanRate = 30000 # Hz
 scansPerRead = int(scanRate)
 
+# Timestamp for data
+# Correlate CORE_TIMER with system clock
+core_timer_values = []
+system_times = []
+scan_system_times = []
+for _ in range(100):
+    start = time.time()
+    core_timer = ljm.eReadName(handle, "CORE_TIMER")
+    end = time.time()
+    core_timer_values.append(core_timer)
+    system_times.append((start + end) / 2)  # Assume CORE_TIMER is halfway between start and end
+    
+# Calculate average distance between CORE_TIMER and system clock
+average_difference = np.mean(np.array(system_times) - np.array(core_timer_values))
+
 # Perform data acquisition
 try:
     # Configure and start stream
     scanRate = ljm.eStreamStart(handle, scansPerRead, numAddresses, aScanList, scanRate)
     print("\nStream started with a scan rate of %0.0f Hz." % scanRate)
+    start_time = ljm.eReadName(handle, "STREAM_START_TIME_STAMP")
+    
     while True:
         ret = ljm.eStreamRead(handle)
-        # start = time.time()
         new_data = ((np.array(ret[0]) - ACCEL_TO_G_OFFSET)/ACCEL_TO_G_SENSITIVITY).tolist()  # Convert to g
         raw_data.extend(new_data)
+        
+        # Calculate CORE_TIMER value for each scan
+        scan_core_timer_values = (start_time + np.arange(len(ret[0])) / scanRate) / 40e6
+        # Convert CORE_TIMER values to system times
+        scan_system_times.extend(scan_core_timer_values + average_difference)
+        
+        # print size of new_data
+        print(f"\nnew_data size: {len(new_data)}")
+        # print size of scan_system_times
+        print(f"\nscan_system_times size: {len(scan_system_times)}")
+        
         # Start a new thread to process the data
         t = threading.Thread(target=process_data, args=(new_data,))
         t.start()
-        # end = time.time()
-        # print(f"\nTime to process: {end - start}")
-        # print(f"\nScan Backlog: {ret[1]}")
         print(f"\nTotal Errors: {raw_data.count(ljm.constants.DUMMY_VALUE)}")
 except Exception as e:
     print("\nUnexpected error: %s" % str(e))
