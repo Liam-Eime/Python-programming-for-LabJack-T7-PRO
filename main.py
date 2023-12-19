@@ -87,10 +87,16 @@ scansPerRead = int(SCAN_RATE)
 
 # Timestamp for data
 # Correlate CORE_TIMER with system clock
+previous_core_timer = 0
 for _ in range(100):
     start = time.time()
     core_timer = ljm.eReadName(handle, "CORE_TIMER") / 40e6
     end = time.time()
+    # Check for CORE_TIMER roll over
+    if core_timer < previous_core_timer:
+        # CORE_TIMER has rolled over, adjust core_timer value
+        core_timer += (2**32 / 40e6)
+    previous_core_timer = core_timer
     core_timer_values.append(core_timer)
     system_times.append((start + end) / 2)  # Assume CORE_TIMER is halfway between start and end (as suggested by LabJack documentation)  
 # Calculate average distance between CORE_TIMER and system clock
