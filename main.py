@@ -23,14 +23,12 @@ in_event = [False, False, False]
 total_data_points = 0
 raw_data = []
 scan_backlog = 0
-core_timer_values = []
-system_times = []
-scan_system_times = []
 
 # Create a lock for scan_system_times
 scan_system_times_lock = threading.Lock()
 
 # Define process data function for stream
+scan_system_times = []
 def process_data(data):
     global total_data_points
     for i in range(NUMBER_OF_AINS):
@@ -85,10 +83,12 @@ numAddresses = len(aScanListNames)
 aScanList = ljm.namesToAddresses(numAddresses, aScanListNames)[0]
 scansPerRead = int(SCAN_RATE)
 
-# Timestamp for data
+# Perform initial synchronization
 # Correlate CORE_TIMER with system clock
 previous_core_timer = 0
-for _ in range(100):
+core_timer_values = []
+system_times = []
+for _ in range(5):
     start = time.time()
     core_timer = ljm.eReadName(handle, "CORE_TIMER") / 40e6
     end = time.time()
@@ -104,6 +104,7 @@ average_difference = np.mean(np.array(system_times) - np.array(core_timer_values
 
 # Perform data acquisition
 try:
+    iteration = 0
     # Configure and start stream
     scanRate = ljm.eStreamStart(handle, scansPerRead, numAddresses, aScanList, SCAN_RATE)
     print("\nStream started with a scan rate of %0.0f Hz." % scanRate)
@@ -113,6 +114,8 @@ try:
         ret = ljm.eStreamRead(handle)
         new_data = ((np.array(ret[0]) - ACCEL_TO_G_OFFSET)/ACCEL_TO_G_SENSITIVITY).tolist()  # Convert to g
         raw_data.extend(new_data)
+        # Update start_time with the CORE_TIMER value at the start of the stream read
+        start_time = ljm.eReadName(handle, "CORE_TIMER") / 40e6
         # Calculate CORE_TIMER value for each scan
         scan_core_timer_values = (start_time + np.arange(len(ret[0])) / scanRate)
         with scan_system_times_lock:
@@ -123,6 +126,23 @@ try:
         t.start()
         # Print total errors
         print(f"\nTotal Errors: {raw_data.count(ljm.constants.DUMMY_VALUE)}")
+        
+        # Re-sync
+        # Correlate CORE_TIMER with system clock
+        core_timer_values = []
+        system_times = []
+        for _ in range(5):
+            start = time.time()
+            core_timer = ljm.eReadName(handle, "CORE_TIMER") / 40e6
+            end = time.time()
+            # Check for CORE_TIMER roll over
+            if core_timer < previous_core_timer:
+                # CORE_TIMER has rolled over, adjust core_timer value
+                core_timer += (2**32 / 40e6)
+            previous_core_timer = core_timer
+            core_timer_values.append(core_timer)
+            system_times.append((start + end) / 2)  # Assume CORE_TIMER is halfway between start and end (as suggested by LabJack documentation)
+        average_difference = np.mean(np.array(system_times) - np.array(core_timer_values))
 except Exception as e:
     print("\nUnexpected error: %s" % str(e))
 except KeyboardInterrupt:  # Ctrl+C
