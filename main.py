@@ -99,14 +99,14 @@ try:
     print("\nStream started with a scan rate of %0.0f Hz." % scanRate)
     
     # Get stream start time as a CORE_TIMER value
-    start_time = ljm.eReadName(handle, "STREAM_START_TIME_STAMP") / TICK_PER_SECOND
+    start_time = ljm.eReadName(handle, "STREAM_START_TIME_STAMP")
     
-    # Read CORE_TIMER and system time
-    synchCoreRead = ljm.eReadName(handle, "CORE_TIMER")
+    # Read CORE_TIMER
+    syncCoreRead = ljm.eReadName(handle, "CORE_TIMER")
 
     # Calculate system timestamp corresponding to the start of stream
     sysTimestamp = time.time()
-    diffTicks = tick_diff_with_roll(start_time, synchCoreRead)  # start_time is the var storing the stream start timestamp
+    diffTicks = tick_diff_with_roll(start_time, syncCoreRead)  # start_time is the var storing the stream start timestamp
     diffSeconds = diffTicks / TICK_PER_SECOND 
     streamStartTimeSystemAligned = sysTimestamp - diffSeconds  # system timestamp corresponding to the start of stream
     
@@ -115,11 +115,11 @@ try:
         ret = ljm.eStreamRead(handle)
         new_data = ((np.array(ret[0]) - ACCEL_TO_G_OFFSET)/ACCEL_TO_G_SENSITIVITY).tolist()  # Convert to g
         raw_data.extend(new_data)
-        num_scans = len(new_data) / NUMBER_OF_AINS
+        num_scans = len(raw_data) / NUMBER_OF_AINS
         scanTimesElapsed = np.arange(num_scans) / scanRate
         scanTimestamps = streamStartTimeSystemAligned + scanTimesElapsed
         with scan_system_times_lock:
-            scan_system_times.extend(scanTimestamps)
+            scan_system_times = scanTimestamps
         # Start a new thread to process the data
         t = threading.Thread(target=process_data, args=(new_data,))
         t.start()
@@ -127,13 +127,13 @@ try:
         print(f"\nTotal Errors: {raw_data.count(ljm.constants.DUMMY_VALUE)}")
         
         # Re-synchronize
-        newCoreRead = ljm.eReadName(handle, "CORE_TIMER")
-        newSysTimestamp = time.time()
-        newDiffTicks = tick_diff_with_roll(synchCoreRead, newCoreRead)
-        newDiffSeconds = newDiffTicks / TICK_PER_SECOND
-        diffSysTimestamps = newSysTimestamp - sysTimestamp
-        drift = diffSysTimestamps - newDiffSeconds
-        streamStartTimeSystemAligned += drift
+        # newCoreRead = ljm.eReadName(handle, "CORE_TIMER")
+        # newSysTimestamp = time.time()
+        # newDiffTicks = tick_diff_with_roll(syncCoreRead, newCoreRead)
+        # newDiffSeconds = newDiffTicks / TICK_PER_SECOND
+        # diffSysTimestamps = newSysTimestamp - sysTimestamp
+        # drift = diffSysTimestamps - newDiffSeconds
+        # streamStartTimeSystemAligned += drift
 except Exception as e:
     print("\nUnexpected error: %s" % str(e))
 except KeyboardInterrupt:  # Ctrl+C
