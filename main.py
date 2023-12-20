@@ -125,15 +125,6 @@ try:
         t.start()
         # Print total errors
         print(f"\nTotal Errors: {raw_data.count(ljm.constants.DUMMY_VALUE)}")
-        
-        # Re-synchronize
-        # newCoreRead = ljm.eReadName(handle, "CORE_TIMER")
-        # newSysTimestamp = time.time()
-        # newDiffTicks = tick_diff_with_roll(syncCoreRead, newCoreRead)
-        # newDiffSeconds = newDiffTicks / TICK_PER_SECOND
-        # diffSysTimestamps = newSysTimestamp - sysTimestamp
-        # drift = diffSysTimestamps - newDiffSeconds
-        # streamStartTimeSystemAligned += drift
 except Exception as e:
     print("\nUnexpected error: %s" % str(e))
 except KeyboardInterrupt:  # Ctrl+C
