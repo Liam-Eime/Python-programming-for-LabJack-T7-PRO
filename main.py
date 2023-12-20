@@ -15,6 +15,7 @@ ACCEL_TO_G_SENSITIVITY = 1  # 1 V/g
 BUFFER_PERIOD = 0.05  # Buffer period in seconds
 SCAN_RATE = 30000  # Hz
 THRESHOLDS = [0.6, 0.6, 1.2]  # x, y, z
+TICK_PER_SECOND = 40e6  # T7 core timer ticks per second
 
 # Initialize variables
 last_spike_times = [0, 0, 0]
@@ -83,66 +84,56 @@ numAddresses = len(aScanListNames)
 aScanList = ljm.namesToAddresses(numAddresses, aScanListNames)[0]
 scansPerRead = int(SCAN_RATE)
 
-# Perform initial synchronization
-# Correlate CORE_TIMER with system clock
-previous_core_timer = 0
-core_timer_values = []
-system_times = []
-for _ in range(5):
-    start = time.time()
-    core_timer = ljm.eReadName(handle, "CORE_TIMER") / 40e6
-    end = time.time()
-    # Check for CORE_TIMER roll over
-    if core_timer < previous_core_timer:
-        # CORE_TIMER has rolled over, adjust core_timer value
-        core_timer += (2**32 / 40e6)
-    previous_core_timer = core_timer
-    core_timer_values.append(core_timer)
-    system_times.append((start + end) / 2)  # Assume CORE_TIMER is halfway between start and end (as suggested by LabJack documentation)  
-# Calculate average distance between CORE_TIMER and system clock
-average_difference = np.mean(np.array(system_times) - np.array(core_timer_values))
+def tick_diff_with_roll(start, end):  # The core timer is a uint32 value that will overflow/rollover
+    diffTicks = 0
+    if end < start:
+        diffTicks = 0xFFFFFFFF - start + end
+    else:
+        diffTicks = end - start
+    return diffTicks
 
 # Perform data acquisition
 try:
-    iteration = 0
     # Configure and start stream
     scanRate = ljm.eStreamStart(handle, scansPerRead, numAddresses, aScanList, SCAN_RATE)
     print("\nStream started with a scan rate of %0.0f Hz." % scanRate)
-    start_time = ljm.eReadName(handle, "STREAM_START_TIME_STAMP") / 40e6
+    
+    # Get stream start time as a CORE_TIMER value
+    start_time = ljm.eReadName(handle, "STREAM_START_TIME_STAMP") / TICK_PER_SECOND
+    
+    # Read CORE_TIMER and system time
+    synchCoreRead = ljm.eReadName(handle, "CORE_TIMER")
+
+    # Calculate system timestamp corresponding to the start of stream
+    sysTimestamp = time.time()
+    diffTicks = tick_diff_with_roll(start_time, synchCoreRead)  # start_time is the var storing the stream start timestamp
+    diffSeconds = diffTicks / TICK_PER_SECOND 
+    streamStartTimeSystemAligned = sysTimestamp - diffSeconds  # system timestamp corresponding to the start of stream
+    
     while True:
         # Read stream data
         ret = ljm.eStreamRead(handle)
         new_data = ((np.array(ret[0]) - ACCEL_TO_G_OFFSET)/ACCEL_TO_G_SENSITIVITY).tolist()  # Convert to g
         raw_data.extend(new_data)
-        # Update start_time with the CORE_TIMER value at the start of the stream read
-        start_time = ljm.eReadName(handle, "CORE_TIMER") / 40e6
-        # Calculate CORE_TIMER value for each scan
-        scan_core_timer_values = (start_time + np.arange(len(ret[0])) / scanRate)
+        num_scans = len(new_data) / NUMBER_OF_AINS
+        scanTimesElapsed = np.arange(num_scans) / scanRate
+        scanTimestamps = streamStartTimeSystemAligned + scanTimesElapsed
         with scan_system_times_lock:
-            # Convert CORE_TIMER values to system times
-            scan_system_times.extend(scan_core_timer_values + average_difference)
+            scan_system_times.extend(scanTimestamps)
         # Start a new thread to process the data
         t = threading.Thread(target=process_data, args=(new_data,))
         t.start()
         # Print total errors
         print(f"\nTotal Errors: {raw_data.count(ljm.constants.DUMMY_VALUE)}")
         
-        # Re-sync
-        # Correlate CORE_TIMER with system clock
-        core_timer_values = []
-        system_times = []
-        for _ in range(5):
-            start = time.time()
-            core_timer = ljm.eReadName(handle, "CORE_TIMER") / 40e6
-            end = time.time()
-            # Check for CORE_TIMER roll over
-            if core_timer < previous_core_timer:
-                # CORE_TIMER has rolled over, adjust core_timer value
-                core_timer += (2**32 / 40e6)
-            previous_core_timer = core_timer
-            core_timer_values.append(core_timer)
-            system_times.append((start + end) / 2)  # Assume CORE_TIMER is halfway between start and end (as suggested by LabJack documentation)
-        average_difference = np.mean(np.array(system_times) - np.array(core_timer_values))
+        # Re-synchronize
+        newCoreRead = ljm.eReadName(handle, "CORE_TIMER")
+        newSysTimestamp = time.time()
+        newDiffTicks = tick_diff_with_roll(synchCoreRead, newCoreRead)
+        newDiffSeconds = newDiffTicks / TICK_PER_SECOND
+        diffSysTimestamps = newSysTimestamp - sysTimestamp
+        drift = diffSysTimestamps - newDiffSeconds
+        streamStartTimeSystemAligned += drift
 except Exception as e:
     print("\nUnexpected error: %s" % str(e))
 except KeyboardInterrupt:  # Ctrl+C
