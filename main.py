@@ -113,6 +113,7 @@ try:
     while True:
         # Read stream data
         ret = ljm.eStreamRead(handle)
+        starting = time.time()
         new_data = ((np.array(ret[0]) - ACCEL_TO_G_OFFSET)/ACCEL_TO_G_SENSITIVITY).tolist()  # Convert to g
         raw_data.extend(new_data)
         num_scans = len(raw_data) / NUMBER_OF_AINS
@@ -125,6 +126,8 @@ try:
         t.start()
         # Print total errors
         print(f"\nTotal Errors: {raw_data.count(ljm.constants.DUMMY_VALUE)}")
+        ending = time.time()
+        print(f"\nTime to read data: {ending - starting:.5f} s")
 except Exception as e:
     print("\nUnexpected error: %s" % str(e))
 except KeyboardInterrupt:  # Ctrl+C
