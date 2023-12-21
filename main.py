@@ -14,13 +14,13 @@ ACCEL_TO_G_OFFSET = 2.5  # 2.5 V = 0 g
 ACCEL_TO_G_SENSITIVITY = 1  # 1 V/g
 BUFFER_PERIOD = 0.05  # Buffer period in seconds
 SCAN_RATE = 30000  # Hz
-THRESHOLDS = [0.6, 0.6, 1.2]  # x, y, z
+THRESHOLDS = np.array([0.6, 0.6, 1.2])  # x, y, z
 TICK_PER_SECOND = 40e6  # T7 core timer ticks per second
 
 # Initialize variables
-last_spike_times = [0, 0, 0]
-max_values = [0, 0, 0]
-in_event = [False, False, False]
+last_spike_times = np.zeros(NUMBER_OF_AINS)
+max_values = np.zeros(NUMBER_OF_AINS)
+in_event = np.array([False, False, False])
 total_data_points = 0
 raw_data = []
 scan_backlog = 0
@@ -30,25 +30,32 @@ scan_system_times_lock = threading.Lock()
 
 # Define process data function for stream
 scan_system_times = []
+
 def process_data(data):
-    global total_data_points
+    global total_data_points, max_values, last_spike_times, in_event
+    # Convert data to numpy arrays
+    data = np.array(data)
+    # Reshape the data into a 2D array with one row per channel
+    data = data.reshape(-1, NUMBER_OF_AINS).T
+    current_time = scan_system_times[total_data_points:total_data_points + data.shape[1]]
+    # Calculate a boolean array where the data is above the threshold
+    above_threshold = data > THRESHOLDS[:, None]
+    # Update max_values and last_spike_times where the data is above the threshold
     for i in range(NUMBER_OF_AINS):
-        for j, value in enumerate(data[i::NUMBER_OF_AINS]):
-            with scan_system_times_lock:
-                current_time = scan_system_times[total_data_points + j]
-            if value > THRESHOLDS[i]:
-                if value > max_values[i]:
-                    # Value is above the current maximum, update the maximum value and the last spike time
-                    max_values[i] = value
-                    last_spike_times[i] = current_time
-                in_event[i] = True
-            elif in_event[i] and current_time - last_spike_times[i] > BUFFER_PERIOD:
-                # Value is below the threshold and the buffer period has passed, print and reset the maximum value
-                time_str = datetime.fromtimestamp(last_spike_times[i]).strftime('%y/%m/%d %H:%M:%S.%f')[:21]
-                print(f"\nMax value for channel {i}: {max_values[i]:.5f}g at {time_str}")
-                max_values[i] = 0
-                in_event[i] = False
-    total_data_points += len(data) // NUMBER_OF_AINS
+        if above_threshold[i].any():
+            max_values[i] = np.maximum(max_values[i], data[i][above_threshold[i]].max())
+            last_spike_times[i] = current_time[above_threshold[i]].max()
+            in_event[i] = True
+    # Calculate a boolean array where the data is below the threshold and the buffer period has passed
+    below_threshold_and_buffer_passed = np.logical_and(~above_threshold, (current_time - last_spike_times[:, None]) > BUFFER_PERIOD)
+    # Print and reset max_values where below_threshold_and_buffer_passed is True and an event has occurred
+    for i in np.where(np.logical_and(below_threshold_and_buffer_passed.any(axis=1), in_event))[0]:
+        time_str = datetime.fromtimestamp(last_spike_times[i]).strftime('%y/%m/%d %H:%M:%S.%f')[:21]
+        print(f"\nMax value for channel {i}: {max_values[i]:.5f}g at {time_str}")
+        max_values[i] = 0
+        in_event[i] = False
+    total_data_points += data.shape[1]
+    
 
 # Open first found LabJack T7 via USB.
 handle = ljm.open(
