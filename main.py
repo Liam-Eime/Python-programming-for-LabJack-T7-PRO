@@ -1,3 +1,10 @@
+    """
+    This example demonstrates how to stream data from a LabJack at high scan/sample rate for multiple analog inputs and process the data in real time.
+    
+    Author: Liam Eime
+    Date: 2023-12-21
+    """
+
 from labjack import ljm
 from datetime import datetime
 import numpy as np
@@ -34,6 +41,11 @@ scan_system_times_lock = threading.Lock()
 scan_system_times = []
 
 def process_data(data):
+    """Process data from the stream.
+
+    Args:
+        data: A list of data from the stream.
+    """
     global total_data_points, max_values, last_spike_times, in_event
     # Convert data to numpy arrays
     data = np.array(data)
@@ -132,9 +144,6 @@ try:
         # Start a new thread to process the data
         t = threading.Thread(target=process_data, args=(new_data,))
         t.start()
-        # Print total errors
-        # total_errors += new_data.count(ljm.constants.DUMMY_VALUE)
-        # print(f"\nTotal Errors: {total_errors}")
         ending = time.time()
         print(f"\nTime to read data: {ending - starting:.5f} s")
 except Exception as e:
