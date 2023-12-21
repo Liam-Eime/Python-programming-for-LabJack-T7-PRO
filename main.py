@@ -24,6 +24,8 @@ in_event = np.array([False, False, False])
 total_data_points = 0
 raw_data = []
 scan_backlog = 0
+total_errors = 0
+total_time_elapsed = 0
 
 # Create a lock for scan_system_times
 scan_system_times_lock = threading.Lock()
@@ -104,35 +106,35 @@ try:
     # Configure and start stream
     scanRate = ljm.eStreamStart(handle, scansPerRead, numAddresses, aScanList, SCAN_RATE)
     print("\nStream started with a scan rate of %0.0f Hz." % scanRate)
-    
     # Get stream start time as a CORE_TIMER value
     start_time = ljm.eReadName(handle, "STREAM_START_TIME_STAMP")
-    
     # Read CORE_TIMER
     syncCoreRead = ljm.eReadName(handle, "CORE_TIMER")
-
     # Calculate system timestamp corresponding to the start of stream
     sysTimestamp = time.time()
     diffTicks = tick_diff_with_roll(start_time, syncCoreRead)  # start_time is the var storing the stream start timestamp
     diffSeconds = diffTicks / TICK_PER_SECOND 
     streamStartTimeSystemAligned = sysTimestamp - diffSeconds  # system timestamp corresponding to the start of stream
-    
     while True:
         # Read stream data
         ret = ljm.eStreamRead(handle)
         starting = time.time()
         new_data = ((np.array(ret[0]) - ACCEL_TO_G_OFFSET)/ACCEL_TO_G_SENSITIVITY).tolist()  # Convert to g
         raw_data.extend(new_data)
-        num_scans = len(raw_data) / NUMBER_OF_AINS
-        scanTimesElapsed = np.arange(num_scans) / scanRate
-        scanTimestamps = streamStartTimeSystemAligned + scanTimesElapsed
+        # Calculate the scan timestamps for the new data
+        num_new_scans = len(new_data) / NUMBER_OF_AINS
+        new_scanTimesElapsed = np.arange(num_new_scans) / scanRate
+        total_time_elapsed += new_scanTimesElapsed[-1]
+        new_scanTimestamps = streamStartTimeSystemAligned + new_scanTimesElapsed + total_time_elapsed
         with scan_system_times_lock:
-            scan_system_times = scanTimestamps
+            # scan_system_times = scanTimestamps
+            scan_system_times = np.concatenate((scan_system_times, new_scanTimestamps))
         # Start a new thread to process the data
         t = threading.Thread(target=process_data, args=(new_data,))
         t.start()
         # Print total errors
-        print(f"\nTotal Errors: {raw_data.count(ljm.constants.DUMMY_VALUE)}")
+        # total_errors += new_data.count(ljm.constants.DUMMY_VALUE)
+        # print(f"\nTotal Errors: {total_errors}")
         ending = time.time()
         print(f"\nTime to read data: {ending - starting:.5f} s")
 except Exception as e:
